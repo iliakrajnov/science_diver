@@ -7,7 +7,6 @@ ai = AI()
 theme = input('Какова твоя тема исследования? ')
 
 plan = ai.plan_article(theme)
-print(plan)
 print('План:', ', '.join(plan))
 
 queries = ai.get_queries(theme) + plan
