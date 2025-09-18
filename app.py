@@ -38,7 +38,7 @@ with open('res.md', 'w', encoding='utf-8') as file:
     conversation_id = None
     for fragment in plan:
         print('Написание:', fragment)
-        conversation_id, content = ai.build_article_fragment(theme, fragment, contexts_dict, conversation_id)
+        conversation_id, content = ai.build_article_fragment(theme, fragment, plan, contexts_dict, conversation_id)
         file.write(content)
         file.flush()
 

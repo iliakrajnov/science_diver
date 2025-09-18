@@ -1,27 +1,31 @@
 from mistralai import Mistral, ChatCompletionResponse
 from .api_key import KEY
-from typing import List, Dict
+from typing import List, Dict, Literal
 from context_item import ContextItem
 from json import loads
 
 
 client = Mistral(KEY)
-MODEL = 'ministral-8b-2410'
+LITTLE_MODEL = 'ministral-8b-2410'
+LARGE_MODEL = 'mistral-large-latest'
 ARGS = {
     "temperature": 0.7,
     "max_tokens": 128000,
     "top_p": 1
 }
 TOKEN_PRICE = {
-    'prompt_tokens': 0.1,
-    'completion_tokens': 0.1
+    'little': {
+        'prompt_tokens': 0.1,
+        'completion_tokens': 0.1
+    },
+    'large': {
+        'prompt_tokens': 2,
+        'completion_tokens': 6
+    }
 }
 
 class AI:
-    used_tokens = {
-        'prompt_tokens': 0,
-        'completion_tokens': 0
-    }
+    price = 0
     
 
     def get_queries(self, theme: str) -> List[str]:
@@ -30,7 +34,7 @@ class AI:
         """
 
         chat_response = client.chat.complete(
-            model = MODEL,
+            model = LITTLE_MODEL,
             messages = [
                 {
                     "role": "system",
@@ -57,7 +61,7 @@ class AI:
         prompt_context = '\n'.join([f'{i}. {repr(v)}' for i, v in enumerate(context)])
         
         chat_response = client.chat.complete(
-            model = MODEL,
+            model = LITTLE_MODEL,
             messages = [
                 {
                     "role": "system",
@@ -83,12 +87,12 @@ class AI:
         """
 
         chat_response = client.chat.complete(
-            model = MODEL,
+            model = LITTLE_MODEL,
             messages = [
                 {
                     "role": "system",
-                    "content": """Твоя задача - формировать списки слов для поиска контекстов в научных статьях, которые имеет смысл процитировать в научной статье по теме заданной пользователем.
-                                Ответ представь в формате json {"result": ["слово1", "слово2"]} указывай строго по одному слову в строке""",
+                    "content": """Твоя задача - формировать большие списки слов для поиска контекстов в научных статьях, которые имеет смысл процитировать в научной статье по теме заданной пользователем.
+                                Ответ представь в формате json {"result": ["слово1", "слово2"]} указывай строго по одному слову в строке. Чем больше список - тем лучше""",
                 },
                 {
                     "role": "user",
@@ -102,7 +106,7 @@ class AI:
         self.__calculate_usage(chat_response)
         return loads(chat_response.choices[0].message.content)['result']
 
-    def build_article_fragment(self, theme: str, fragment_name: str, contexts_dict: List[Dict[str, str | List[str]]], conversation_id: str = None) -> str:
+    def build_article_fragment(self, theme: str, fragment_name: str, full_plan: List[str], contexts_dict: List[Dict[str, str | List[str]]], conversation_id: str = None) -> str:
         """
         Строит фрагмент статьи по теме и списку статей. Возвращает строку с статьёй.
         """
@@ -111,13 +115,15 @@ class AI:
         chat_response = None
         if conversation_id == None:
             chat_response = client.beta.conversations.start(
-                model = MODEL,
+                model = LARGE_MODEL,
                 inputs = [
                     {
                         "role": "assistant",
                         "content": f"""Твоя задача - написать фрагмент статьи, готовой к публикации в респектабельном научном журнале по теме предоставленной пользователем, обязательно процитировав статьи указанные пользователем. Они будут предоставлены в формате json.
-                        Верно укажи библиографические записи. Цитируй статьи сразу после использования их содержимого вот так: [Запись по гост, например Киселев Алексей Алексеевич. Сравнение технологий WebSocket и Socket.IO // Инновационные аспекты развития науки и техники. 2021.]. Не обрамляй статью лишним контентом
+                        Цитирование обязательно. Верно укажи библиографические записи. Цитируй статьи сразу после использования их содержимого вот так: [Запись по гост, например Киселев Алексей Алексеевич. Сравнение технологий WebSocket и Socket.IO // Инновационные аспекты развития науки и техники. 2021.].
+                        Не обрамляй статью лишним контентом. Учти, тебе будут подаваться требуемые фрагменты по порядку, требуется чтобы ты написал только этот фрагмент и никаких других, твои ответы будут писаться в файл.
                         Тема: {theme}
+                        Всего статья будет состоять из следующих фрагментов: {', '.join(full_plan)}
                         Статьи: {contexts_dict}""",
                     },
                     {
@@ -136,7 +142,7 @@ class AI:
                     }
                 ]
             )
-        self.__calculate_usage(chat_response)
+        self.__calculate_usage(chat_response, 'large')
         return (chat_response.conversation_id, chat_response.outputs[0].content)
 
     def plan_article(self, theme: str) -> List[str]:
@@ -145,7 +151,7 @@ class AI:
         """
 
         chat_response = client.chat.complete(
-            model = MODEL,
+            model = LITTLE_MODEL,
             messages = [
                 {
                     "role": "system",
@@ -164,8 +170,7 @@ class AI:
         self.__calculate_usage(chat_response)
         return loads(chat_response.choices[0].message.content)['result']
 
-    def __calculate_usage(self, responce: ChatCompletionResponse):
-        self.used_tokens['prompt_tokens'] += responce.usage.prompt_tokens
-        self.used_tokens['completion_tokens'] += responce.usage.completion_tokens
-        print('Вход:', self.used_tokens['prompt_tokens'], f'${TOKEN_PRICE["prompt_tokens"] / 1000000 * self.used_tokens['prompt_tokens']}', sep='\t')
-        print('Выход:', self.used_tokens['completion_tokens'], f'${TOKEN_PRICE["completion_tokens"] / 1000000 * self.used_tokens['completion_tokens']}', sep='\t')
+    def __calculate_usage(self, responce: ChatCompletionResponse, model_type: Literal['little', 'large'] = 'little'):
+        self.price += TOKEN_PRICE[model_type]["prompt_tokens"] / 1000000 * responce.usage.prompt_tokens
+        self.price += TOKEN_PRICE[model_type]["completion_tokens"] / 1000000 * responce.usage.completion_tokens
+        print(f'Цена работы: ${self.price}')
